@@ -10,8 +10,8 @@ import argparse
 import exifread
 import json
 import os
+import subprocess
 from collections import Counter
-from termcolor import colored
 
 class Parser:
     """This holds the argument parsing tool."""
@@ -31,74 +31,95 @@ class Parser:
         self.statparse.add_argument('-w', '--workdir', default='.', help='The directory where the search should be started.')
         self.showparse = self.subparser.add_parser('show')
         self.showparse.add_argument('-f', '--file', default=None, help='Show EXIF information for a given file.')
+        self.showparse.add_argument('-t','--tag', default=None, help='Tag to show options for.')
 
     def return_args(self):
         """Return arguments used on CLI"""
         args = self.parser.parse_args()
         return args
 
-class FileTree:
-    """ Holds info and methods operating on a file tree. """
-    def __init__(self, workdir, suffix):
-        """ Initializes the File tree and creates a list of all json file paths. """
-        self.leaves = []
-        temporary = []
-        for root, dirs, files in os.walk(workdir):
-            for f in files:
-                path = os.path.join(root, f)
-                temporary.append(path)
-        for leaf in temporary:
-            if suffix.lower() in leaf[-3:].lower():
-                self.leaves.append(leaf)
-
-    def count(self):
-        """ Return the number of files. """
-        return len(self.leaves)
-
-    def return_paths(self):
-        """Return all found paths."""
-        return self.leaves
-
 class FileReader:
     """ Holds info and methods for file parsing. """
-    def __init__(self, path):
+    def __init__(self, path, params=None):
         """ Initializes the class with all possible paths. """
         self.path = path
+        self.params = params
         
     def read_tags(self):
-        imagefile = open(self.path, 'rb')
-        tags = exifread.process_file(imagefile, details=False)
-        imagefile.close()
-        return tags
+        """ Reads EXIF tags from the files in the directory tree. """
+        tags = {}
+        database = {}
+        params = ['exiftool']
+        if self.params:
+            params = params + self.params
+        params.append(self.path)
+        try:
+            run = subprocess.run(params, capture_output=True)
+            exifdata = run.stdout.decode('utf8').split('\n')
+            if '===' not in exifdata[0]:
+                for line in exifdata:    
+                   try:
+                       rec = line.split(':')
+                       key = rec[0].strip()
+                       value = rec[1].strip()
+                       tags[key] = value
+                   except IndexError:
+                       pass
+                database[self.path] = tags
+            else:
+                for line in exifdata:
+                    if line[:4] == '===':
+                        filepath = line.split(' ')[1].strip()
+                    else:    
+                        try:
+                            rec = line.split(':')
+                            key = rec[0].strip()
+                            value = rec[1].strip()
+                        except IndexError:
+                            pass
+                        tags[key] = value
+                    database[filepath] = tags
+
+        except FileNotFoundError:  
+            print('This program cannot work without EXIFTOOL. Please, install it first.')
+            print('If you are on Fedora, use `sudo dnf install perl-Image-ExifTool`')
+            print('====================================================================')
+            print('Good bye!')
+        self.database = database
+        return database 
+
+    def get_file_data(self, filename):
+        return self.database[filename]
 
 class FileAnalyser:
     """Calculates stats for a given EXIF tag."""
-    def __init__(self, batch):
-        self.batch = batch
+    def __init__(self, database):
+        self.dbase = database
         self.calculations = {}
-        self.total = 0
+        self.total = len(self.dbase.keys()) 
 
     def return_stats(self, tag):
+        """ Return raw sums for found EXIF tags. """
         values = []
-        for image in self.batch:
-            reader = FileReader(image)
-            tags = reader.read_tags()
+        for image in self.dbase.keys():
+            tags = self.dbase.get_file_data(image)
             try:
                 value = tags[tag]
             except KeyError:
-                pass
-            values.append(str(value))
+                value = 'not available'
+            values.append(value)
         self.calculations = Counter(values)
         self.total = len(values)
         return self.calculations
 
-    def humanify_stats(self):
+    def process_stats(self):
+        """ Calculate percentages and sort results. """
         result = []
         keys = self.calculations.keys()
         keys = list(keys)
         for key in keys:
             value = self.calculations[key]
-            percentage = round((value/self.total)*100, 0)
+            percentage = round((value/self.total)*100, 2)
             result.append((percentage, key))
         result.sort(reverse=True)
         return result
@@ -123,15 +144,14 @@ def main():
         suffix = args.suffix.lower()
     else:
         imagefile = args.file
+        tag = args.tag
 
     if command == 'show':
-        if not imagefile:
-            print("No file name has been given. Please, enter a file to read from.")
-        else:
-            reader = FileReader(imagefile)
-            tags = reader.read_tags()
-            for tag in tags.keys():
-                print(tag, ' : ', tags[tag])
+        reader = FileReader(imagefile)
+        reader.read_tags()
+        tags = reader.get_file_data(imagefile)
+        for tag in tags.keys():
+            print(tag, ' : ', tags[tag])
 
     elif command == 'stats':
         fileTree = FileTree(workdir, suffix)
@@ -141,24 +161,15 @@ def main():
         print(f"Calculating stats from {fileTree.count()} image files.")
         print("-------------------------------------------------------")
         print(f"Frequency statistics for '{tag}': \n")
-        result = analyse.humanify_stats()
+        result = analyse.process_stats()
         for line in result:
             print(f"{line[1]} \t| {line[0]} %")
 
     elif command == 'search':
-        pass
+        print("This function has not been implemented yet.")
 
     else:
         print('Nothing to do.')
-
-    #exifTree = FileTree(workdir, suffix)
-    #images = exifTree.return_paths()
-    #print(exifTree.count())
-    #for image in images:
-    #    print(image)
-
-
-
 
 if __name__ == '__main__':
     main()
