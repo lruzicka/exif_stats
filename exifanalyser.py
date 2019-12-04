@@ -67,7 +67,7 @@ class FileReader:
         
     def read_tags(self):
         imagefile = open(self.path, 'rb')
-        tags = exifread.process_file(imagefile)
+        tags = exifread.process_file(imagefile, details=False)
         imagefile.close()
         return tags
 
