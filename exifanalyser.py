@@ -7,7 +7,6 @@ Created by Lukas Ruzicka (lruzicka@redhat.com) under the GPLv3 license
 """
 
 import argparse
-import exifread
 import json
 import os
 import re
