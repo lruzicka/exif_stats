@@ -10,6 +10,7 @@ import argparse
 import exifread
 import json
 import os
+import re
 import subprocess
 from collections import Counter
 
@@ -56,7 +57,9 @@ class FileReader:
         try:
             run = subprocess.run(params, capture_output=True)
             exifdata = run.stdout.decode('utf8').split('\n')
-            if '===' not in exifdata[0]:
+
+            match = re.match('=+', exifdata[0])
+            if not match: # Then it is not a multi exif
                 for line in exifdata:    
                    try:
                        rec = line.split(':')
@@ -67,18 +70,26 @@ class FileReader:
                        pass
                 database[self.path] = tags
             else:
+                path = 'unknown'
                 for line in exifdata:
-                    if line[:4] == '===':
-                        filepath = line.split(' ')[1].strip()
-                    else:    
+                    match = re.match("=+", line)
+                    if match:
+                        path = line.split(' ')[1].strip()
+                        database[path] = []
+                    else:
+                        database[path] = database[path]+[line] 
+                for path in database.keys():
+                    exif = database[path]
+                    tags = {}
+                    for tag in exif:
                         try:
-                            rec = line.split(':')
+                            rec = tag.split(':')
                             key = rec[0].strip()
                             value = rec[1].strip()
+                            tags[key] = value
                         except IndexError:
                             pass
-                        tags[key] = value
-                    database[filepath] = tags
+                    database[path] = tags
 
         except FileNotFoundError:  
             print('This program cannot work without EXIFTOOL. Please, install it first.')
@@ -98,11 +109,14 @@ class FileAnalyser:
         self.calculations = {}
         self.total = len(self.dbase.keys()) 
 
+#    def show_file_exif(self, image):
+#        return self.dbase[image]
+
     def return_stats(self, tag):
         """ Return raw sums for found EXIF tags. """
         values = []
         for image in self.dbase.keys():
-            tags = self.dbase.get_file_data(image)
+            tags = self.dbase[image]
             try:
                 value = tags[tag]
             except KeyError:
@@ -120,14 +134,72 @@ class FileAnalyser:
         for key in keys:
             value = self.calculations[key]
             percentage = round((value/self.total)*100, 2)
-            result.append((percentage, key))
+            result.append((percentage, key, value))
         result.sort(reverse=True)
         return result
-            
+
+class Outputter:
+    """ Formats output for console. """
+    def __init__(self, level=1):
+        self.linelen = 50
+        self.level = level
+        self.textlen = 0
+        self.symbols = {0:'=', 1:'-', 2:'.', 'bar':'#', 'warn':'!'}
+
+    def textout(self, text):
+        self.textlen = len(text) + 4
+        toprint = []
+        symbol = self.symbols[self.level]
+        decor = self.textlen * symbol
+        line = f"{symbol} {text} {symbol}"
+        if self.level < 2:
+            toprint.append(decor)
+            line = f"{symbol} {text} {symbol}"
+            toprint.append(line)
+            toprint.append(decor)
+        else:
+            line = f" >> {text}"
+            toprint.append(line)
+        toprint.append(' ')
+        for line in toprint:
+            print(line)
+
+    def tableout(self, data):
+        """ Make a table out of data, accepts the dictionary of keys: values. """
+        longest = 0
+        for key in data.keys():
+            if len(key) > longest:
+                longest = len(key)
+        tabfill = 1
+        for key in data.keys():
+            tabfill = (longest-len(key))+1
+            tab = tabfill * ' '
+            print(f"{key}{tab}: {data[key]}")
+                
+    def graph(self, data):
+        """ Make a graph out of statistics data, accepts lists with tuples (perc, keys, count) """
+        longest = 0
+        for item in data:
+            if len(item[1]) > longest:
+                longest = len(item[1])
+        tabfill = 1
+        for item in data:
+            tabfill = (longest-len(item[1]))+1
+            tab = tabfill * ' '
+            barlen = int((item[0]/100)*50)
+            bar = barlen * self.symbols['bar']
+            print(f"{item[1]}{tab}: {bar} {int(item[0])}% ({item[2]} files)")
+
 def main():
     """ Main program """
-    print('Exif Analyser:')
-    print('==================================================')
+    # Register printers
+    h1 = Outputter(0)
+    h2 = Outputter(1)
+    h3 = Outputter(2)
+    bar = Outputter('bar')
+    warn = Outputter('warn')
+
+    h1.textout('Exif Analyser 0.9:')
     
     # Collect CLI arguments
     argparser = Parser()
@@ -137,11 +209,11 @@ def main():
     if command == 'search':
         tag = args.tags
         workdir = args.workdir
-        suffix = args.suffix.lower()
+        suffix = args.suffix
     elif command == 'stats':
         tag = args.tag
         workdir = args.workdir
-        suffix = args.suffix.lower()
+        suffix = args.suffix
     else:
         imagefile = args.file
         tag = args.tag
@@ -150,20 +222,22 @@ def main():
         reader = FileReader(imagefile)
         reader.read_tags()
         tags = reader.get_file_data(imagefile)
-        for tag in tags.keys():
-            print(tag, ' : ', tags[tag])
+        bar.tableout(tags)
 
     elif command == 'stats':
-        fileTree = FileTree(workdir, suffix)
-        images = fileTree.return_paths()
-        analyse = FileAnalyser(images)
+        if suffix:
+            params = ['-ext', suffix, '-r.']
+        reader = FileReader(workdir, params)
+        h3.textout("Waiting for the ExifTool backend to finish. This can take some time.")
+        dbase = reader.read_tags()
+        totaltags = len(dbase.keys())
+        h3.textout(f"{totaltags} files have been found in `{workdir}`.")
+        analyse = FileAnalyser(dbase)
         result = analyse.return_stats(tag)
-        print(f"Calculating stats from {fileTree.count()} image files.")
-        print("-------------------------------------------------------")
-        print(f"Frequency statistics for '{tag}': \n")
+        h3.textout(f"Calculating statistics based on these files.")
+        h2.textout(f"Frequency statistics for the '{tag}' tag:")
         result = analyse.process_stats()
-        for line in result:
-            print(f"{line[1]} \t| {line[0]} %")
+        bar.graph(result)
 
     elif command == 'search':
         print("This function has not been implemented yet.")
