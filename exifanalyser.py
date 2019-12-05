@@ -143,7 +143,7 @@ class Outputter:
         self.linelen = 50
         self.level = level
         self.textlen = 0
-        self.symbols = {0:'=', 1:'-', 2:'.', 'bar':'#', 'warn':'!'}
+        self.symbols = {0:'=', 1:'-', 2:'.', 3:'#', 4:'!'}
 
     def textout(self, text):
         self.textlen = len(text) + 4
@@ -195,8 +195,8 @@ def main():
     h1 = Outputter(0)
     h2 = Outputter(1)
     h3 = Outputter(2)
-    bar = Outputter('bar')
-    warn = Outputter('warn')
+    bar = Outputter(3)
+    warn = Outputter(4)
 
     h1.textout('Exif Analyser 0.9:')
     
@@ -214,8 +214,11 @@ def main():
         workdir = args.workdir
         suffix = args.suffix
     else:
-        imagefile = args.file
-        tag = args.tag
+        try:
+            imagefile = args.file
+            tag = args.tag
+        except AttributeError:
+            warn.textout("You should add some parameters. Try the -h switch.")
 
     if command == 'show':
         reader = FileReader(imagefile)
