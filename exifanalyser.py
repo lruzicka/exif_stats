@@ -26,7 +26,7 @@ class Parser:
         self.searchparse.add_argument('-w', '--workdir', default='.', help='The directory where the search should be started.')
         self.statparse = self.subparser.add_parser('stats')
         self.statparse.add_argument('-t', '--tag', default='EXIF ISOSpeedRatings', help='The Exif tag for which the stats should be calculated.')
-        self.statparse.add_argument('-s', '--suffix', default='dng',
+        self.statparse.add_argument('-s', '--suffix', default=None,
                 help='Comma separated list of file suffixes to search in')
         self.statparse.add_argument('-w', '--workdir', default='.', help='The directory where the search should be started.')
         self.showparse = self.subparser.add_parser('show')
@@ -186,7 +186,7 @@ class Outputter:
             tabfill = (longest-len(item[1]))+1
             tab = tabfill * ' '
             barlen = int((item[0]/100)*50)
-            bar = barlen * self.symbols['bar']
+            bar = barlen * self.symbols[3]
             print(f"{item[1]}{tab}: {bar} {int(item[0])}% ({item[2]} files)")
 
 def main():
@@ -227,8 +227,9 @@ def main():
         bar.tableout(tags)
 
     elif command == 'stats':
+        params = ['-r.']
         if suffix:
-            params = ['-ext', suffix, '-r.']
+            params = params + ['-ext', suffix]
         reader = FileReader(workdir, params)
         h3.textout("Waiting for the ExifTool backend to finish. This can take some time.")
         dbase = reader.read_tags()
